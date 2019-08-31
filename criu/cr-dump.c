@@ -1554,7 +1554,7 @@ err:
 	if (ret)
 		pr_err("Pre-dumping FAILED.\n");
 	else {
-		write_stats(DUMP_STATS);
+		write_stats(DUMP_STATS, 1);
 		pr_info("Pre-dumping finished successfully\n");
 	}
 	return ret;
@@ -1760,7 +1760,7 @@ static int cr_dump_finish(int ret)
 	if (ret) {
 		pr_err("Dumping FAILED.\n");
 	} else {
-		write_stats(DUMP_STATS);
+		write_stats(DUMP_STATS, 0);
 		pr_info("Dumping finished successfully\n");
 	}
 	return post_dump_ret ? : (ret != 0);

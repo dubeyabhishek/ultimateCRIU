@@ -351,7 +351,8 @@ static int generate_vma_iovs(struct pstree_item *item, struct vma_area *vma,
 			     struct page_pipe *pp, struct page_xfer *xfer,
 			     struct parasite_dump_pages_args *args,
 			     struct parasite_ctl *ctl, pmc_t *pmc,
-			     bool has_parent, bool pre_dump)
+			     bool has_parent, bool pre_dump,
+			     int parent_predump_mode)
 {
 	u64 off = 0;
 	u64 *map;
@@ -362,17 +363,47 @@ static int generate_vma_iovs(struct pstree_item *item, struct vma_area *vma,
 		return 0;
 
 	/*
-	 * process_vm_readv syscall can't copy memory regions lacking
-	 * PROT_READ flag. Therefore, avoid generating iovs for such
-	 * regions in "read" mode pre-dump. Regions skipped by pre-dumps
-	 * can't be referred as parent by following dump stage. So, mark
-	 * "has_parent=false" for such regions.
+	 * To facilitate any combination of pre-dump modes to run after
+	 * one another, we need to take extra care as discussed below.
+	 *
+	 * The SPLICE mode pre-dump, processes all type of memory regions,
+	 * whereas READ mode pre-dump skips processing those memory regions
+	 * which lacks PROT_READ flag.
+	 *
+	 * Now on mixing pre-dump modes:
+	 * 	If SPLICE mode follows SPLICE mode	: no issue
+	 *		-> everything dumped both the times
+	 *
+	 * 	If READ mode follows READ mode		: no issue
+	 *		-> non-PROT_READ skipped both the time
+	 *
+	 * 	If READ mode follows SPLICE mode   	: no issue
+	 *		-> everything dumped at first,
+	 *		   the non-PROT_READ skipped later
+	 *
+	 * 	If SPLICE mode follows READ mode   	: Need special care
+	 *
+	 * If READ pre-dump happens first then it has skipped processing
+	 * non-PROT_READ regions. Following SPLICE pre-dump expects pagemap
+	 * entries for all mappings in parent pagemap, but last READ mode
+	 * pre-dump has skipped processing and pagemap generation for
+	 * non-PROT_READ regions. So SPLICE mode throws error of missing
+	 * pagemap entry for non-PROT_READ mapping.
+	 *
+	 * To resolve this, the mode of pre-dump is stored in pre-dump's
+	 * stats file. This mode is read back from stats file during next
+	 * pre-dump.
+	 * If parent-pre-dump and next pre-dump turns out in READ-mode -->
+	 * SPLICE-mode order, then SPLICE mode doesn't expect mappings for
+	 * non-PROT_READ regions in parent-image and marks "has_parent=false".
 	 */
-	if (opts.pre_dump_mode == PRE_DUMP_READ &&
-	                          !(vma->e->prot & PROT_READ)) {
-		if (pre_dump)
+
+	if (!(vma->e->prot & PROT_READ)) {
+		if (opts.pre_dump_mode == PRE_DUMP_READ && pre_dump)
 			return 0;
-		has_parent = false;
+		if ((parent_predump_mode == PRE_DUMP_READ &&
+			opts.pre_dump_mode == PRE_DUMP_SPLICE) || !pre_dump)
+			has_parent = false;
 	}
 
 	if (vma_entry_is(vma->e, VMA_AREA_AIORING)) {
@@ -420,6 +451,7 @@ static int __parasite_dump_pages_seized(struct pstree_item *item,
 	unsigned long pmc_size;
 	int possible_pid_reuse = 0;
 	bool has_parent;
+	int parent_predump_mode;
 
 	pr_info("\n");
 	pr_info("Dumping pages (type: %d pid: %d)\n", CR_FD_PAGES, item->pid->real);
@@ -486,9 +518,12 @@ static int __parasite_dump_pages_seized(struct pstree_item *item,
 	 */
 	args->off = 0;
 	has_parent = !!xfer.parent && !possible_pid_reuse;
+	parent_predump_mode = get_parent_pre_dump_type();
+
 	list_for_each_entry(vma_area, &vma_area_list->h, list) {
 		ret = generate_vma_iovs(item, vma_area, pp, &xfer, args, ctl,
-					&pmc, has_parent, mdc->pre_dump);
+					&pmc, has_parent, mdc->pre_dump,
+					parent_predump_mode);
 		if (ret < 0)
 			goto out_xfer;
 	}
@@ -593,11 +628,11 @@ int parasite_dump_pages_seized(struct pstree_item *item,
 			pr_err("Can't dump unprotect vmas with parasite\n");
 			return ret;
 		}
+	}
 
-		if (fault_injected(FI_DUMP_PAGES)) {
-			pr_err("fault: Dump VMA pages failure!\n");
-			return -1;
-		}
+	if (fault_injected(FI_DUMP_PAGES)) {
+		pr_err("fault: Dump VMA pages failure!\n");
+		return -1;
 	}
 
 	ret = __parasite_dump_pages_seized(item, pargs, vma_area_list, mdc, ctl);

@@ -51,6 +51,6 @@ extern void cnt_sub(int c, unsigned long val);
 #define RESTORE_STATS	2
 
 extern int init_stats(int what);
-extern void write_stats(int what);
-
+extern void write_stats(int what, int pre_dump);
+extern int get_parent_pre_dump_type();
 #endif /* __CR_STATS_H__ */

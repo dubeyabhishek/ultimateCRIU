@@ -149,7 +149,7 @@ static void display_stats(int what, StatsEntry *stats)
 		return;
 }
 
-void write_stats(int what)
+void write_stats(int what, int pre_dump)
 {
 	StatsEntry stats = STATS_ENTRY__INIT;
 	DumpStatsEntry ds_entry = DUMP_STATS_ENTRY__INIT;
@@ -183,6 +183,8 @@ void write_stats(int what)
 		ds_entry.has_shpages_skipped_parent = true;
 		ds_entry.shpages_written = dstats->counts[CNT_SHPAGES_WRITTEN];
 		ds_entry.has_shpages_written = true;
+		ds_entry.pre_dump_mode = opts.pre_dump_mode;
+		ds_entry.has_pre_dump_mode = pre_dump;
 
 		name = "dump";
 	} else if (what == RESTORE_STATS) {
@@ -227,4 +229,42 @@ int init_stats(int what)
 
 	rstats = shmalloc(sizeof(struct restore_stats));
 	return rstats ? 0 : -1;
+}
+
+int get_parent_pre_dump_type(void)
+{
+        struct cr_img *img;
+        StatsEntry *stats;
+        int dir;
+        unsigned int parent_pre_dump_mode = -1;
+
+        dir = openat(get_service_fd(IMG_FD_OFF), CR_PARENT_LINK, O_RDONLY);
+        if (dir == -1) {
+                if (errno != ENOENT)
+                        pr_err("Failed to open parent directory for \
+					pre-dump mode reading\n");
+                return parent_pre_dump_mode;
+        }
+
+        img = open_image_at(dir, CR_FD_STATS, O_RSTR, "dump");
+        if (!img) {
+                pr_err("Failed to open parent pre-dump stats image\n");
+                close(dir);
+                return parent_pre_dump_mode;
+        }
+
+        if (pb_read_one(img, &stats, PB_STATS) < 0) {
+                pr_err("Failed to read parent pre-dump stat entry\n");
+                close_image(img);
+                close(dir);
+                return parent_pre_dump_mode;
+        }
+
+        if (stats->dump->has_pre_dump_mode) {
+                parent_pre_dump_mode = (int)stats->dump->pre_dump_mode;
+        }
+
+        close_image(img);
+        close(dir);
+        return parent_pre_dump_mode;
 }
