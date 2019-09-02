@@ -1280,13 +1280,13 @@ class criu:
             a_opts += ['--empty-ns', 'net']
         if self.__pre_dump_mode:
             a_opts += ["--pre-dump-mode", "%s" % self.__pre_dump_mode]
-        if self.__mix_pre_dump:
-            if(random.randrange(1, 1000, 5) % 2):
-                print("Mix-mode selected: splice")
-                a_opts += ["--pre-dump-mode", "splice"]
+        if self.__mix_pre_dump and action == "pre-dump":
+            if(predump_cnt % 2):
+                print("Mix-mode selected: %s" % pre_dump1)
+                a_opts += ["--pre-dump-mode", pre_dump1]
             else:
-                print("Mix-mode selected: read")
-                a_opts += ["--pre-dump-mode", "read"]
+                print("Mix-mode selected: %s" % pre_dump2)
+                a_opts += ["--pre-dump-mode", pre_dump2]
 
         nowait = False
         if self.__lazy_migrate and action == "dump":
@@ -1436,23 +1436,52 @@ def iter_parm(opt, dflt):
     return (range(0, int(x[0])), float(x[1]))
 
 
+def dmp(cr_api, test, opts, case):
+    global predump_cnt
+    global pre_dump1, pre_dump2
+
+    predump_cnt = 0
+
+    if opts['mix_pre_dump']:
+        if case == 1:
+            pre_dump1="splice"
+            pre_dump2="splice"
+        elif case == 2:
+            pre_dump1="read"
+            pre_dump2="read"
+        elif case == 3:
+            pre_dump1="splice"
+            pre_dump2="read"
+        elif case == 4:
+            pre_dump1="read"
+            pre_dump2="splice"
+
+    pres = iter_parm(opts['pre'], 0)
+    for p in pres[0]:
+        if opts['snaps']:
+            cr_api.dump("dump", opts=["--leave-running", "--track-mem"])
+        else:
+            if opts['mix_pre_dump']:
+                predump_cnt += 1
+            cr_api.dump("pre-dump")
+            try_run_hook(test, ["--post-pre-dump"])
+            test.pre_dump_notify()
+        time.sleep(pres[1])
+
+
 def cr(cr_api, test, opts):
     if opts['nocr']:
         return
-
     cr_api.set_test(test)
 
     iters = iter_parm(opts['iters'], 1)
     for i in iters[0]:
-        pres = iter_parm(opts['pre'], 0)
-        for p in pres[0]:
-            if opts['snaps']:
-                cr_api.dump("dump", opts=["--leave-running", "--track-mem"])
-            else:
-                cr_api.dump("pre-dump")
-                try_run_hook(test, ["--post-pre-dump"])
-                test.pre_dump_notify()
-            time.sleep(pres[1])
+        if opts['mix_pre_dump']:
+            for case in range(1,5):
+                print("===== mix-pre-dump case %d =====" % (case))
+                dmp(cr_api, test, opts, case)
+        else:
+            dmp(cr_api, test, opts, 0)
 
         sbs('pre-dump')
 
