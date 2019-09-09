@@ -2226,7 +2226,7 @@ skip_ns_bouncing:
 	if (ret != 0) {
 		pr_err("Aborting restore due to post-restore script ret code %d\n", ret);
 		timing_stop(TIME_RESTORE);
-		write_stats(RESTORE_STATS, 0);
+		write_stats(RESTORE_STATS);
 		goto out_kill;
 	}
 
@@ -2292,7 +2292,7 @@ skip_ns_bouncing:
 	/* Detaches from processes and they continue run through sigreturn. */
 	finalize_restore_detach(ret);
 
-	write_stats(RESTORE_STATS, 0);
+	write_stats(RESTORE_STATS);
 
 	ret = run_scripts(ACT_POST_RESUME);
 	if (ret != 0)

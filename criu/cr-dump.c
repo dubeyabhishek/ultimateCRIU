@@ -1488,6 +1488,9 @@ static int cr_pre_dump_finish(int status)
 	if (ret)
 		goto err;
 
+	he.has_pre_dump_mode = true;
+	he.pre_dump_mode = opts.pre_dump_mode;
+
 	pstree_switch_state(root_item, TASK_ALIVE);
 
 	timing_stop(TIME_FROZEN);
@@ -1554,7 +1557,7 @@ err:
 	if (ret)
 		pr_err("Pre-dumping FAILED.\n");
 	else {
-		write_stats(DUMP_STATS, 1);
+		write_stats(DUMP_STATS);
 		pr_info("Pre-dumping finished successfully\n");
 	}
 	return ret;
@@ -1760,7 +1763,7 @@ static int cr_dump_finish(int ret)
 	if (ret) {
 		pr_err("Dumping FAILED.\n");
 	} else {
-		write_stats(DUMP_STATS, 0);
+		write_stats(DUMP_STATS);
 		pr_info("Dumping finished successfully\n");
 	}
 	return post_dump_ret ? : (ret != 0);
@@ -1938,6 +1941,8 @@ int cr_dump_tasks(pid_t pid)
 	ret = inventory_save_uptime(&he);
 	if (ret)
 		goto err;
+
+        he.has_pre_dump_mode = false;
 
 	ret = write_img_inventory(&he);
 	if (ret)

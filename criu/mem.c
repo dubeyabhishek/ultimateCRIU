@@ -451,7 +451,7 @@ static int __parasite_dump_pages_seized(struct pstree_item *item,
 	unsigned long pmc_size;
 	int possible_pid_reuse = 0;
 	bool has_parent;
-	int parent_predump_mode;
+	int parent_predump_mode = -1;
 
 	pr_info("\n");
 	pr_info("Dumping pages (type: %d pid: %d)\n", CR_FD_PAGES, item->pid->real);
@@ -518,7 +518,9 @@ static int __parasite_dump_pages_seized(struct pstree_item *item,
 	 */
 	args->off = 0;
 	has_parent = !!xfer.parent && !possible_pid_reuse;
-	parent_predump_mode = get_parent_pre_dump_type();
+
+	if(mdc->parent_ie)
+		parent_predump_mode = mdc->parent_ie->pre_dump_mode;
 
 	list_for_each_entry(vma_area, &vma_area_list->h, list) {
 		ret = generate_vma_iovs(item, vma_area, pp, &xfer, args, ctl,
