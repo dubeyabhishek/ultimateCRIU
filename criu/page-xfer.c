@@ -639,8 +639,6 @@ static inline u32 ppb_xfer_flags(struct page_xfer *xfer, struct page_pipe_buf *p
  *	aux_iov: {A,1}{B,1}{C,2}*{C+3,1}*
  */
 
-static char userbuf[PIPE_MAX_SIZE << 12];
-
 unsigned long handle_faulty_iov(int pid, struct iovec* riov,
                                 unsigned long faulty_index,
                                 struct iovec *bufvec, struct iovec* aux_iov,
@@ -774,7 +772,7 @@ static long fill_userbuf(int pid, struct page_pipe_buf *ppb,
 				continue;
 			} else if (errno == ESRCH) {
 				pr_debug("Target process PID:%d not found\n", pid);
-				return PR_UNAVIL;
+				return ESRCH;
 			}
 		}
 
@@ -825,18 +823,22 @@ int page_xfer_predump_pages(int pid, struct page_xfer *xfer,
 	struct iovec aux_iov[PIPE_MAX_SIZE];
 	unsigned long aux_len;
 
+	char *userbuf = xzalloc(BUFFER_SIZE);
+
 	list_for_each_entry(ppb, &pp->bufs, l) {
 
 		timing_start(TIME_MEMDUMP);
 
 		aux_len = 0;
-		bufvec.iov_len = sizeof(userbuf);
+		bufvec.iov_len = BUFFER_SIZE;
 		bufvec.iov_base = userbuf;
 
 		bytes_read = fill_userbuf(pid, ppb, &bufvec, aux_iov, &aux_len);
 
-		if (bytes_read == PR_UNAVIL)
+		if (bytes_read == ESRCH) {
+			xfree(userbuf);
 			return -1;
+		}
 
 		bufvec.iov_base = userbuf;
 		bufvec.iov_len = bytes_read;
@@ -844,6 +846,7 @@ int page_xfer_predump_pages(int pid, struct page_xfer *xfer,
 
 		if (ret == -1 || ret != bytes_read) {
 			pr_err("vmsplice: Failed to splice user buffer to pipe %ld\n", ret);
+			xfree(userbuf);
 			return -1;
 		}
 
@@ -857,8 +860,10 @@ int page_xfer_predump_pages(int pid, struct page_xfer *xfer,
 			u32 flags;
 
 			ret = dump_holes(xfer, pp, &cur_hole, iov.iov_base);
-			if (ret)
+			if (ret) {
+				xfree(userbuf);
 				return ret;
+			}
 
 			BUG_ON(iov.iov_base < (void *)xfer->offset);
 			iov.iov_base -= xfer->offset;
@@ -867,15 +872,21 @@ int page_xfer_predump_pages(int pid, struct page_xfer *xfer,
 
 			flags = ppb_xfer_flags(xfer, ppb);
 
-			if (xfer->write_pagemap(xfer, &iov, flags))
+			if (xfer->write_pagemap(xfer, &iov, flags)) {
+				xfree(userbuf);
 				return -1;
-			if (xfer->write_pages(xfer, ppb->p[0], iov.iov_len))
+			}
+
+			if (xfer->write_pages(xfer, ppb->p[0], iov.iov_len)) {
+				xfree(userbuf);
 				return -1;
+			}
 		}
 
 		timing_stop(TIME_MEMWRITE);
         }
 
+	xfree(userbuf);
 	timing_start(TIME_MEMWRITE);
 	return dump_holes(xfer, pp, &cur_hole, NULL);
 }
